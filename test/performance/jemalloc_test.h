@@ -6,7 +6,7 @@ class jemallocTest : public Test
   public:
     jemallocTest()
     {
-        m_name = "jemallocTest";
+        m_name = "jemalloc";
     }
     virtual bool New(unsigned long long *ms)
     {

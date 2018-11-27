@@ -10,7 +10,7 @@ vector<Test*> ts;
 void Init() {
     ts.push_back(new ptmallocTest());
     ts.push_back(new zzzallocatorTest());
-    // ts.push_back(new jemallocTest());
+//    ts.push_back(new jemallocTest());
 }
 void Release() {
     for (const auto & t : ts) {
