@@ -1,7 +1,7 @@
 # zzzallocator
 ## 简介
 zzzallocator是一个快速内存分配器，用于快速分配和回收内存，提高内存的再利用率，仅支持单线程。
-对于以下场景，zzzallocator有明显优势
+对于以下场景，zzzallocator相对于ptmalloc和jemalloc有明显优势
 1. 分配1000个对象
 2. 删除1000个对象
 3. 再分配1000个对象
