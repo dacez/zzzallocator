@@ -5,7 +5,7 @@ class zzzallocatorTest : public Test
   public:
     zzzallocatorTest()
     {
-        m_name = "zzzallocTest";
+        m_name = "zzzalloc";
     }
     virtual bool New(unsigned long long *ms)
     {

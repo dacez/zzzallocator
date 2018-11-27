@@ -6,7 +6,7 @@ class ptmallocTest : public Test
   public:
     ptmallocTest()
     {
-        m_name = "ptmallocTest";
+        m_name = "ptmalloc";
     }
     virtual bool New(unsigned long long *ms)
     {

@@ -140,7 +140,7 @@ static inline void *za_Alloc(za_Allocator *allocator, za_size_t size)
 {
     if (za_UNLIKELY(size == 0)) return 0;
     za_bin *bin = za_findBin(allocator, size);
-    za_size_t *s = 0;
+    za_size_t *s;
     if (za_UNLIKELY(bin == 0))
     {
         s = (za_size_t *)za_innerNew(sizeof(za_size_t) + size);
@@ -152,6 +152,8 @@ static inline void *za_Alloc(za_Allocator *allocator, za_size_t size)
     if (bin->Head != 0)
     {
         s = (za_size_t *)bin->Head->Ptr;
+        *s = bin->ChunkSize;
+
         za_binNode *bn = bin->Head;
         bin->Head = bin->Head->Next;
 
@@ -171,12 +173,14 @@ static inline void *za_Alloc(za_Allocator *allocator, za_size_t size)
 static inline void za_Free(za_Allocator *allocator, void *ptr)
 {
     za_size_t *s = (za_size_t *)ptr - 1;
+    if (za_UNLIKELY(*s == 0)) return;
     za_bin *bin = za_findBin(allocator, *s);
     if (za_UNLIKELY(bin == 0))
     {
         za_innerFree(s);
         return;
     }
+    *s = 0;
     za_binNode *bn;
     if (bin->FreeHead != 0)
     {
