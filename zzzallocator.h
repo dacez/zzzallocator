@@ -12,17 +12,6 @@
 #define za_Delta 2
 #endif
 
-// 默认是64位操作系统
-#ifndef za_OS_BIT
-#define za_OS_BIT 64
-#endif
-
-#if za_OS_BIT == 64
-typedef uint64_t za_size_t;
-#elif
-typedef uint32_t za_size_t;
-#endif
-
 #ifndef za_INIT_SIZE
 #define za_INIT_SIZE (1024 * 128)
 #endif
@@ -57,7 +46,7 @@ typedef struct za_binNode
 
 typedef struct za_bin
 {
-    za_size_t ChunkSize;
+    size_t ChunkSize;
     za_binNode *Head;
     za_binNode *FreeHead;
 
@@ -67,8 +56,8 @@ typedef struct za_bin
 typedef struct za_allocatorNode
 {
     void *Data;
-    za_size_t Pos;
-    za_size_t Size;
+    size_t Pos;
+    size_t Size;
     struct za_allocatorNode *Next;
 } za_allocatorNode;
 
@@ -78,11 +67,15 @@ typedef struct za_Allocator
     za_allocatorNode *Head;
     za_allocatorNode *End;
     za_bin Bins[za_BIN_LEVEL * za_BIN_LEVEL_SIZE];
-    za_size_t LevelMins[za_BIN_LEVEL];
-    za_size_t LevelMaxs[za_BIN_LEVEL];
+    size_t LevelMins[za_BIN_LEVEL];
+    size_t LevelMaxs[za_BIN_LEVEL];
+#ifdef za_ALLOCTOR_DEBUG
+    size_t AllocSize;
+    size_t FreeSize;
+#endif
 } za_Allocator;
 
-static inline void *za_innerNew(za_size_t size);
+static inline void *za_innerNew(size_t size);
 static inline void za_innerFree(void *pointer);
 
 // 新建一个Allocator
@@ -95,12 +88,16 @@ static inline za_Allocator *za_New()
     za_Allocator *allocator = (za_Allocator *)ptr;
     allocator->Head = (za_allocatorNode *)((char *)ptr + sizeof(za_Allocator));
     allocator->End = allocator->Head;
+#ifdef za_ALLOCTOR_DEBUG
+    allocator->AllocSize = 0;
+    allocator->FreeSize = 0;
+#endif
     memset(allocator->Bins, 0, sizeof(allocator->Bins));
-    za_size_t chunk_size = za_BIN_MIN_CHUNK;
-    for (za_size_t i = 0; i < za_BIN_LEVEL; ++i)
+    size_t chunk_size = za_BIN_MIN_CHUNK;
+    for (size_t i = 0; i < za_BIN_LEVEL; ++i)
     {
         allocator->LevelMins[i] = chunk_size;
-        for (za_size_t j = 0; j < za_BIN_LEVEL_SIZE;)
+        for (size_t j = 0; j < za_BIN_LEVEL_SIZE;)
         {
             za_bin *b = allocator->Bins + i * za_BIN_LEVEL_SIZE + j;
             b->Head = 0;
@@ -132,48 +129,76 @@ static inline void za_Release(za_Allocator *allocator)
     za_innerFree((void *)allocator);
 }
 
-static inline za_bin *za_findBin(za_Allocator *allocator, za_size_t size);
-static inline void *za_alloc(za_Allocator *allocator, za_size_t size);
+static inline za_bin *za_findBin(za_Allocator *allocator, size_t size);
+static inline void *za_alloc(za_Allocator *allocator, size_t size);
 static inline void za_Free(za_Allocator *allocator, void *ptr);
 // 分配内存
-static inline void *za_Alloc(za_Allocator *allocator, za_size_t size)
+static inline void *za_Alloc(za_Allocator *allocator, size_t size)
 {
-    if (za_UNLIKELY(size == 0)) return 0;
+    if (za_UNLIKELY(size == 0))
+        return 0;
     za_bin *bin = za_findBin(allocator, size);
-    za_size_t *s;
+    size_t *s;
     if (za_UNLIKELY(bin == 0))
     {
-        s = (za_size_t *)za_innerNew(sizeof(za_size_t) + size);
+        s = (size_t *)za_innerNew(sizeof(size_t) + size);
         if (za_UNLIKELY(s == 0))
             return 0;
         *s = size;
+#ifdef za_ALLOCTOR_DEBUG
+        allocator->AllocSize += size;
+#endif
         return (void *)(s + 1);
     }
     if (bin->Head != 0)
     {
-        s = (za_size_t *)bin->Head->Ptr;
-        *s = bin->ChunkSize;
+        s = (size_t *)bin->Head->Ptr;
+        *s = size;
 
         za_binNode *bn = bin->Head;
         bin->Head = bin->Head->Next;
 
         bn->Next = bin->FreeHead;
         bin->FreeHead = bn;
-
+#ifdef za_ALLOCTOR_DEBUG
+        allocator->AllocSize += size;
+#endif
         return (void *)(s + 1);
     }
-    s = (za_size_t *)za_alloc(allocator, sizeof(za_size_t) + bin->ChunkSize);
+    s = (size_t *)za_alloc(allocator, sizeof(size_t) + bin->ChunkSize);
     if (za_UNLIKELY(s == 0))
         return 0;
-    *s = bin->ChunkSize;
+    *s = size;
+#ifdef za_ALLOCTOR_DEBUG
+    allocator->AllocSize += size;
+#endif
     return (void *)(s + 1);
+}
+static inline void *za_ReAlloc(za_Allocator *allocator, void *addr, size_t size)
+{
+    void *ret = za_Alloc(allocator, size);
+    size_t *addr_size = (size_t *)addr - 1;
+    if (za_UNLIKELY(*addr_size > size))
+    {
+        memcpy(ret, addr, size);
+    }
+    else
+    {
+        memcpy(ret, addr, *addr_size);
+    }
+    za_Free(allocator, addr);
+    return ret;
 }
 
 // 释放内存
 static inline void za_Free(za_Allocator *allocator, void *ptr)
 {
-    za_size_t *s = (za_size_t *)ptr - 1;
-    if (za_UNLIKELY(*s == 0)) return;
+    size_t *s = (size_t *)ptr - 1;
+    if (za_UNLIKELY(*s == 0))
+        return;
+#ifdef za_ALLOCTOR_DEBUG
+    allocator->FreeSize += *s;
+#endif
     za_bin *bin = za_findBin(allocator, *s);
     if (za_UNLIKELY(bin == 0))
     {
@@ -208,41 +233,32 @@ static inline void za_Print(za_Allocator *allocator)
     printf("Allocator:\n");
     printf("Ptr %p Head %p End %p Bins %p\n", allocator, allocator->Head, allocator->End, allocator->Bins);
     printf("    Mins: ");
-    for (za_size_t i = 0; i < za_BIN_LEVEL; ++i) {
-#if za_OS_BIT == 64
-        printf("%lu ", allocator->LevelMins[i]);
-#else
-        printf("%u ", allocator->LevelMins[i]);
-#endif
+    for (size_t i = 0; i < za_BIN_LEVEL; ++i)
+    {
+        printf("%zu ", allocator->LevelMins[i]);
     }
     printf("\n");
     printf("    Maxs: ");
-    for (za_size_t i = 0; i < za_BIN_LEVEL; ++i) {
-#if za_OS_BIT == 64
-        printf("%lu ", allocator->LevelMaxs[i]);
-#else
-        printf("%lu ", allocator->LevelMaxs[i]);
-#endif
+    for (size_t i = 0; i < za_BIN_LEVEL; ++i)
+    {
+        printf("%zu ", allocator->LevelMaxs[i]);
     }
     printf("\n");
     za_allocatorNode *n = allocator->Head;
     printf("AllocatorNodes:\n");
     while (n)
     {
-#if za_OS_BIT == 64
-        printf("    Ptr %p Data %p Pos %lu Size %lu Next %p\n", n, n->Data, n->Pos, n->Size, n->Next);
-#else
-        printf("    Ptr %p Data %p Pos %u Size %u Next %p\n", n, n->Data, n->Pos, n->Size, n->Next);
-#endif
+        printf("    Ptr %p Data %p Pos %zu Size %zu Next %p\n", n, n->Data, n->Pos, n->Size, n->Next);
         n = n->Next;
     }
     printf("Bins:\n");
-    for (za_size_t i = 0; i < za_BIN_LEVEL * za_BIN_LEVEL_SIZE; ++i)
+    for (size_t i = 0; i < za_BIN_LEVEL * za_BIN_LEVEL_SIZE; ++i)
     {
         za_bin *b = allocator->Bins + i;
-        if (b->Head == 0 && b->FreeHead == 0) continue;
-        za_size_t bn_c = 0;
-        za_size_t fbn_c = 0;
+        if (b->Head == 0 && b->FreeHead == 0)
+            continue;
+        size_t bn_c = 0;
+        size_t fbn_c = 0;
         if (b->Head != 0)
         {
             za_binNode *bn = b->Head;
@@ -263,25 +279,23 @@ static inline void za_Print(za_Allocator *allocator)
                 ++fbn_c;
             }
         }
-#if za_OS_BIT == 64
-        printf("    [%lu] Ptr %p ChunkSize %lu Head %p FreeHead %p BNSize %lu FBNSize %lu\n", i, b, b->ChunkSize, b->Head, b->FreeHead, bn_c, fbn_c);
-#else
-        printf("    [%u] Ptr %p ChunkSize %u Head %p FreeHead %p BNSize %lu FBNSize %lu\n", i, b, b->ChunkSize, b->Head, b->FreeHead, bn_c, bn_fc);
-#endif
+        printf("    [%zu] Ptr %p ChunkSize %lu Head %p FreeHead %p BNSize %zu FBNSize %zu\n", i, b, b->ChunkSize, b->Head, b->FreeHead, bn_c, fbn_c);
     }
 }
 // 找到合适的Bin
-static inline za_bin *za_findBin(za_Allocator *allocator, za_size_t size)
+static inline za_bin *za_findBin(za_Allocator *allocator, size_t size)
 {
-    for (za_size_t i = 0; i < za_BIN_LEVEL; ++i) {
-        if (za_LIKELY(size <= allocator->LevelMaxs[i])) {
-            return allocator->Bins + ((size-1) / allocator->LevelMins[i]) + za_BIN_LEVEL_SIZE * i;
+    for (size_t i = 0; i < za_BIN_LEVEL; ++i)
+    {
+        if (za_LIKELY(size <= allocator->LevelMaxs[i]))
+        {
+            return allocator->Bins + ((size - 1) / allocator->LevelMins[i]) + za_BIN_LEVEL_SIZE * i;
         }
     }
     return 0;
 }
 // 追加一个Allocator
-static inline bool za_appendChild(za_size_t init_size, struct za_Allocator *allocator)
+static inline bool za_appendChild(size_t init_size, struct za_Allocator *allocator)
 {
     // 每次分配一大块内存，避免多次分配
     void *ptr = za_innerNew(sizeof(za_allocatorNode) + init_size);
@@ -299,10 +313,10 @@ static inline bool za_appendChild(za_size_t init_size, struct za_Allocator *allo
 }
 
 // 分配大小为size的内存
-static inline void *za_alloc(za_Allocator *allocator, za_size_t size)
+static inline void *za_alloc(za_Allocator *allocator, size_t size)
 {
     za_allocatorNode *cur_node = allocator->End;
-    za_size_t s = cur_node->Size;
+    size_t s = cur_node->Size;
     if (za_UNLIKELY(cur_node->Pos + size > s))
     {
         s *= za_Delta;
@@ -319,7 +333,7 @@ static inline void *za_alloc(za_Allocator *allocator, za_size_t size)
     return ret;
 }
 
-static inline void *za_innerNew(za_size_t size)
+static inline void *za_innerNew(size_t size)
 {
     return malloc(size);
 }
